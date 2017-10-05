@@ -1,0 +1,376 @@
+<html>
+    <head>
+        <style>
+            * {
+                box-sizing: border-box;
+            }
+            body {
+                display: flex;
+            
+                margin: 0px;
+            }
+            #cmap {
+                margin: auto;
+            
+                width: 800px;
+                height: 600px;
+                
+                border: 1px solid black;
+            }
+        </style>
+        <style>
+            .concept {
+                position: absolute;
+                transform: translate(-50%, -50%);
+
+                border-radius: 5px;
+                border: 1px solid gray;
+                
+                padding: 5px;
+                
+                user-select: none;
+                white-space: nowrap;
+                background-color: white;
+                font: 12px "Courier New";
+            }
+            .concept[contenteditable=false] {
+                cursor: default;
+            }
+            .concept[contenteditable=false] img {
+                -webkit-user-drag: none;
+                -khtml-user-drag: none;
+                -moz-user-drag: none;
+                -o-user-drag: none;
+                user-drag: none;
+            }
+        </style>
+        <script src="vec2.js"></script>
+        <script src="rich-text.js"></script>
+        <script>
+            function getOffset(elem, clientPos) {
+                var clientRect = elem.getBoundingClientRect();
+                return new Vec2(clientPos.x - clientRect.left, clientPos.y - clientRect.top);
+            }
+            
+            function initConceptMap(cmap) {
+                function createCanvas(cmap) {
+                    var canvas = document.createElement("canvas");
+                    canvas.style.position = "absolute";
+                    canvas.style.left = "0px";
+                    canvas.style.top = "0px";
+                    
+                    canvas.context = canvas.getContext("2d");
+                    
+                    cmap.appendChild(canvas);
+                    
+                    return canvas;
+                }
+                function createSVG(cmap) {
+                    var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+                    svg.style.display = "none";
+                    svg.style.position = "absolute";
+                    svg.style.left = "0px";
+                    svg.style.top = "0px";
+                    
+                    cmap.appendChild(svg);
+                    
+                    var rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+                    rect.style.stroke = "blue";
+                    rect.style.strokeOpacity = "0.8";
+                    rect.style.fill = "blue";
+                    rect.style.fillOpacity = "0.2";
+                    
+                    svg.rect = rect;
+                    svg.appendChild(rect);
+                    
+                    return svg;
+                }
+                function createMap(cmap) {
+                    var map = document.createElement("div");
+                    map.style.position = "absolute";
+                    map.style.left = "0px";
+                    map.style.top = "0px";
+                    
+                    cmap.appendChild(map);
+                    
+                    return map;
+                }
+                
+                function createConcept(offset) {
+                    console.log("Create concept");
+                    
+                    function startEditing() {
+                        console.log("Start editing");
+                        
+                        concept.contentEditable = true;
+                        concept.focus();
+                        
+                        cmap.richText.selectAll();
+                        
+                        cmap.editing = true;
+                    }
+                    function stopEditing() {
+                        console.log("Stop editing");
+                        
+                        cmap.editing = false;
+                        
+                        concept.contentEditable = "false";
+                    }
+                    function startDragging(offset) {
+                        console.log("Start dragging");
+                        
+                        if (!concept.selected) {
+                            clearSelection();
+                            selectConcept(concept);
+                        }
+                        
+                        cmap.dragStart = offset;
+                    }
+                    function startLinking(offset) {
+                        console.log("Start linking");
+                        
+                        cmap.linkSource = concept;
+                        cmap.linkDest = offset;
+                    }
+                    function finishLinking() {
+                        console.log("Finish linking (Existing concept)");
+                        
+                        if (concept != cmap.linkSource)
+                            addLink(cmap.linkSource, concept);
+                    
+                        cmap.linkSource = null;
+                        cmap.linkDest = null;
+                        
+                        updateConceptMap();
+                    }
+                    
+                    var concept = document.createElement("div");
+                    concept.className = "concept";
+                    concept.style.left = offset.x;
+                    concept.style.top = offset.y;
+                    concept.spellcheck = false;
+            
+                    map.appendChild(concept);
+                    
+                    concept.ins = new Set();
+                    concept.outs = new Set();
+                    
+                    cmap.concepts.add(concept);
+                    
+                    clearSelection();
+                    selectConcept(concept);
+            
+                    startEditing();
+                    
+                    resizeConceptMap();
+            
+                    concept.ondblclick = function (event) {
+                        event.stopPropagation();
+                        
+                        startEditing();
+                    }
+                    concept.onblur = function () {
+                        stopEditing();
+                    }
+                    concept.oninput = function () {
+                        resizeConceptMap();
+                    }
+                    concept.onmousedown = function (event) {
+                        event.stopPropagation();
+                        
+                        if (concept.contentEditable == "true")
+                            return;
+                        
+                        if (event.ctrlKey == false && event.button == 0)
+                            startDragging(getOffset(map, new Vec2(event.clientX, event.clientY)));
+                        if (event.ctrlKey == true && event.button == 0)
+                            startLinking(getOffset(map, new Vec2(event.clientX, event.clientY)));
+                    }
+                    concept.onmouseup = function (event) {
+                        if (event.button == 0 && cmap.linkSource != null)
+                            finishLinking();
+                    }
+                    
+                    return concept;
+                }
+                function selectConcept(concept) {
+                    console.log("Select concept");
+                    
+                    concept.selected = true;
+                    cmap.selConcepts.add(concept);
+                }
+                function startSelection(offset) {
+                    console.log("Begin selection");
+                    
+                    clearSelection();
+                    cmap.selStart = offset;
+                    
+                    svg.style.display = "block";
+                    
+                    updateSelection(offset);
+                }
+                function updateSelection(offset) {
+                    console.log("Make selection");
+                    
+                    svg.rect.setAttribute("x", Math.min(offset.x, cmap.selStart.x));
+                    svg.rect.setAttribute("y", Math.min(offset.y, cmap.selStart.y));
+                    svg.rect.setAttribute("width", Math.abs(offset.x - cmap.selStart.x));
+                    svg.rect.setAttribute("height", Math.abs(offset.y - cmap.selStart.y));
+                }
+                function finishSelection() {
+                    console.log("Finish selection");
+                    
+                    svg.style.display = "none";
+                
+                    cmap.selStart = null;
+                }
+                function clearSelection() {
+                    console.log("Clear selection");
+                    
+                    for (let concept of cmap.selConcepts)
+                        concept.selected = false;
+                        
+                    cmap.selConcepts.clear();
+                }
+                function updateDragging(offset) {
+                    console.log("Update dragging");
+                    
+                    for (let concept of cmap.selConcepts) {
+                        concept.style.left = parseFloat(concept.style.left) + offset.x - cmap.dragStart.x + "px";
+                        concept.style.top = parseFloat(concept.style.top) + offset.y - cmap.dragStart.y + "px";
+                        
+                        cmap.dragStart = offset;
+                    }
+                    
+                    resizeConceptMap();
+                    updateConceptMap();
+                }
+                function stopDragging() {
+                    console.log("Stop dragging");
+                
+                    cmap.dragStart = null;
+                }
+                function deleteSelection() {
+                    console.log("Delete selection");
+                    
+                    for (let concept of cmap.selConcepts) {
+                        cmap.concepts.delete(concept);
+                        map.removeChild(concept);
+                    }
+                    
+                    cmap.selConcepts.clear();
+                }
+                function updateLinking(offset) {
+                    console.log("Update linking");
+                    
+                    cmap.linkDest = offset;
+                    
+                    updateConceptMap();
+                }
+                function finishLinking() {
+                    console.log("Finish linking (New concept)");
+                    
+                    cmap.linkSource = null;
+                    cmap.linkDest = null;
+                    
+                    updateConceptMap();
+                }
+                function addLink(source, dest) {
+                    source.outs.add(dest);
+                    dest.ins.add(source);
+                }
+                
+                function resizeConceptMap() {
+                    canvas.width = Math.max(map.scrollWidth + cmap.margin, cmap.clientWidth);
+                    canvas.height = Math.max(map.scrollHeight + cmap.margin, cmap.clientHeight);
+                    
+                    svg.style.width = cmap.scrollWidth + "px";
+                    svg.style.height = cmap.scrollHeight  + "px";
+                }
+                function updateConceptMap() {
+                    var context = canvas.context;
+                    
+                    context.clearRect(0, 0, canvas.width, canvas.height);
+                    
+                    for (let source of cmap.concepts) {
+                        for (let dest of source.outs) {
+                            context.beginPath();
+                            context.moveTo(source.offsetLeft, source.offsetTop);
+                            context.lineTo(dest.offsetLeft, dest.offsetTop);
+                            context.stroke();
+                        }
+                    }
+                    
+                    if (cmap.linkSource != null) {
+                        context.beginPath();
+                        context.moveTo(cmap.linkSource.offsetLeft, cmap.linkSource.offsetTop);
+                        context.lineTo(cmap.linkDest.x, cmap.linkDest.y);
+                        context.stroke();
+                    }
+                }
+                
+                cmap.tabIndex = "0";
+                cmap.style.position = "relative";
+                cmap.style.overflow = "scroll";
+                
+                cmap.richText = new RichText(document);
+                cmap.margin = 50;
+                
+                cmap.concepts = new Set();
+                
+                cmap.selConcepts = new Set();
+                cmap.selLinks = new Set();
+                
+                cmap.selStart = null;
+                cmap.dragStart = null;
+                cmap.editing = false;
+                cmap.linkSource = null;
+                cmap.linkDest = null;
+                
+                var canvas = createCanvas(cmap);
+                var map = createMap(cmap);
+                var svg = createSVG(cmap);
+                
+                resizeConceptMap();
+                    
+                cmap.ondblclick = function (event) {
+                    createConcept(getOffset(map, new Vec2(event.clientX, event.clientY)));
+                }
+                cmap.onmousedown = function (event) {
+                    var offset = getOffset(cmap, new Vec2(event.clientX, event.clientY));
+                    if (event.button == 0 && offset.x < cmap.clientWidth && offset.y < cmap.clientHeight)
+                        startSelection(getOffset(map, new Vec2(event.clientX, event.clientY)));
+                }
+                cmap.onmousemove = function (event) {
+                    if (cmap.selStart != null)
+                        updateSelection(getOffset(map,  new Vec2(event.clientX, event.clientY)));
+                    else if (cmap.dragStart != null)
+                        updateDragging(getOffset(map, new Vec2(event.clientX, event.clientY)));
+                    else if (cmap.linkSource != null)
+                        updateLinking(getOffset(map, new Vec2(event.clientX, event.clientY)));
+                }
+                cmap.onmouseup = function (event) {
+                    if (event.button == 0 && cmap.selStart != null)
+                        finishSelection();
+                    else if (event.button == 0 && cmap.dragStart != null)
+                        stopDragging();
+                    else if (event.button == 0 && cmap.linkSource != null)
+                        finishLinking();
+                }
+                cmap.onkeydown = function (event) {
+                    if (cmap.editing)
+                        return;
+                
+                    if (event.keyCode == 46)
+                        deleteSelection();
+                }
+            }
+        </script>
+    </head>
+    <body>
+        <div id="cmap"></div>
+        <script>
+            initConceptMap(cmap);
+        </script>
+    </body>
+</html>
